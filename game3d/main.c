@@ -1,10 +1,18 @@
 #include "cub3D.h"
+
 #define mini_map 0.2
 void init_image(t_data *data)
 {
     int bpp, size_line, endian;
+    data->img_wall = mlx_xpm_file_to_image(data->mlx, "wall.xpm", &(data->player.block_size), &(data->player.block_size));
+    if (!data->img_wall)
+        return;
+    data->img_wall2 = mlx_xpm_file_to_image(data->mlx, "wall2.xpm", &(data->player.block_size), &(data->player.block_size));
+    if (!data->img_wall2)
+        return;
     data->img = mlx_new_image(data->mlx, data->width * data->player.block_size, data->height * data->player.block_size);
     data->addr = mlx_get_data_addr(data->img, &bpp, &size_line, &endian);
+
     data->bits_per_pixel = bpp;
     data->line_length = size_line;
     data->endian = endian;
@@ -39,9 +47,23 @@ int close_window(t_data *data)
 int is_position_invalid(t_data *data, float x, float y)
 {
     // Convert coordinates to grid position (assuming grid size of 1)
-    int grid_x = (int)(x + 0.5);
-    int grid_y = (int)(y + 0.5);
+    int grid_x = (int)(x); //
+    int grid_y = (int)(y); //
 
+    // int dirx = cos(data->player.rotation_angle);
+    // int diry = sin(data->player.rotation_angle);
+    // int grid_x;
+    // int grid_y;
+
+    // if (dirx >= 0)
+    //     grid_x = (int)(x + 0.5);
+    // else
+    //     grid_x = (int)(x - 0.5);
+
+    // if (diry >= 0)
+    //     grid_y = (int)(y + 0.5);
+    // else
+    //     grid_y = (int)(y - 0.5);
     // Check if position is outside the map
     if (grid_x < 0 || grid_x >= data->width || grid_y < 0 || grid_y >= data->height)
         return 1; // Outside of the map
@@ -118,6 +140,34 @@ int key_release(int keycode, t_data *data)
         data->player.walk_dir = 0;
 
     return (0);
+}
+
+int ft_get_color_xpm(t_data *data, int texX, int texY, int side)
+{
+    int color = 0;
+    int bpp, size_line, endian;
+    char *addr_image;
+    char *dst;
+
+    // Ensure texX and texY are within the texture bounds
+    if (texX < 0 || texX >= data->player.block_size || texY < 0 || texY >= data->player.block_size)
+        return 0;
+
+    // Get the data address of the image
+    if (side == 0)
+        addr_image = mlx_get_data_addr(data->img_wall, &bpp, &size_line, &endian);
+    else
+        addr_image = mlx_get_data_addr(data->img_wall2, &bpp, &size_line, &endian);
+    if (!addr_image)
+        return 0;
+
+    // Calculate the memory position of the pixel (texX, texY)
+    dst = addr_image + (texY * size_line + texX * (bpp / 8));
+
+    // Get the color value at the calculated position
+    color = *(unsigned int *)dst;
+
+    return color;
 }
 void ft_draw_wall3d(t_data *data)
 {
@@ -210,7 +260,7 @@ void ft_draw_wall3d(t_data *data)
         // Calculate line height with proper scaling
         int lineHeight = (int)((screen_height / perpWallDist) * distance / screen_width);
         if (perpWallDist <= 0.1)
-            continue;
+            perpWallDist = 0.1;
 
         // Calculate drawing bounds
         int drawStart = screen_height / 2 - lineHeight / 2;
@@ -223,7 +273,7 @@ void ft_draw_wall3d(t_data *data)
         // Draw the walls
         int color;
         float number = perpWallDist * 50;
-        number /= 10;
+        number /= 25;
         // printf("my data is x = %d and  %2.f\n\n", x, number / 10 );
         if (side == 1)
             color = 0x00AA0000;
@@ -231,17 +281,43 @@ void ft_draw_wall3d(t_data *data)
             color = 0x00FF0000;
         if (color == 0x00FF0000)
         {
-            for(int i = 0; i <= number; i++)
+            for (int i = 0; i <= number; i++)
                 color -= 0x00030000;
         }
         else
         {
-            for(int i = 0; i <= number; i++)
+            for (int i = 0; i <= number; i++)
                 color -= 0x00020000;
         }
+        int textur_x;
+        double wallX;
 
+        // Calculate the exact position of the wall hit
+        if (side == 0)
+            wallX = data->player.y + perpWallDist * rayDirY;
+        else
+            wallX = data->player.x + perpWallDist * rayDirX;
+        // printf("befor %2.f\n", wallX);
+        wallX -= floor(wallX);
+
+        // Calculate texture x-coordinate
+        textur_x = (int)(wallX * (double)data->player.block_size);
+        // if ((side == 0 && rayDirX > 0) || (side == 1 && rayDirY < 0))
+        //     textur_x = data->player.block_size - textur_x;
+
+        // Loop through each pixel in the vertical slice
         for (int y = drawStart; y < drawEnd; y++)
-            my_mlx_pixel_put(data, x, y, color);
+        {
+            int d = (y * 2 - screen_height + lineHeight);
+            int textur_y = ((d * data->player.block_size) / lineHeight) / 2;
+
+            int col = ft_get_color_xpm(data, textur_x, textur_y, side);
+            // for (int i = 0; i < number; i++)
+            //     col -= 0x00010000;
+
+            // Draw the pixel with the retrieved color
+            my_mlx_pixel_put(data, x, y, col);
+        }
 
         // Draw ceiling
         for (int y = 0; y < drawStart; y++)
@@ -390,8 +466,8 @@ int render_frame(t_data *data)
     }
 
     // Draw player (assuming player coordinates are in map units, not pixels)
-    int player_x = data->player.x * data->player.block_size * mini_map + data->player.block_size * mini_map / 2;
-    int player_y = data->player.y * data->player.block_size * mini_map + data->player.block_size * mini_map / 2;
+    int player_x = data->player.x * data->player.block_size * mini_map;
+    int player_y = data->player.y * data->player.block_size * mini_map;
     draw_circle(data, player_x, player_y, data->player.radius * mini_map, 0x0000FF00);
     draw_line(data, player_x, player_y, 0x0000FF00, 0);
     mlx_put_image_to_window(data->mlx, data->win, data->img, 0, 0);
